@@ -8,12 +8,26 @@ MongoDB has its own connection pool.  ActiveRecord has its own connection pool.
 This is a generic connection pool that can be used with anything, e.g. Redis,
 Dalli and other Ruby network clients.
 
+↑どこでも使えるコネクションプールの仕組み。
 
 Usage
 -----
 
 Create a pool of objects to share amongst the fibers or threads in your Ruby
 application:
+
+まとめると: 
+・スレッド間でコネクションプールを共有できる仕組みを提供している。
+やり方としては、
+1. ConnectionPoolインスタンスに接続.newするブロックを渡す。
+2. ConnectionPool#withで現在のスレッドから接続を獲得しようとする。（各スレッドで１つのコネクションを使う？ これあってるのかな）
+3. この際、コネクションプール数、獲得の成否をTimedStackで管理する。できなければTimeoutというエラーで返す。
+4. あるスレッドでコネクションを使い終わったら、TimedStackにしらせ、Queに戻す。こうすることで他のスレッドからも使えるようになる。
+
+わからないこと:
+スレッド間でどんな情報共有できて、何ができないのか
+各スレッドで１つのコネクションを使う？ => これはあっているのか
+
 
 ``` ruby
 $memcached = ConnectionPool.new(size: 5, timeout: 5) { Dalli::Client.new }

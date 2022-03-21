@@ -110,6 +110,9 @@ class TestConnectionPool < Minitest::Test
   end
 
   def test_with
+    
+    binding.pry
+    
     pool = ConnectionPool.new(timeout: 0, size: 1) { Object.new }
 
     pool.with do
@@ -130,6 +133,8 @@ class TestConnectionPool < Minitest::Test
   end
 
   def test_with_timeout
+    require 'pry'
+    binding.pry
     pool = ConnectionPool.new(timeout: 0, size: 1) { Object.new }
 
     assert_raises Timeout::Error do

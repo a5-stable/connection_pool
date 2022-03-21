@@ -42,27 +42,44 @@ class ConnectionPool
     Wrapper.new(options, &block)
   end
 
+  # STEP_1
+  # new
+  # 
+  # e.g.)  @pool = ConnectionPool.new { Redis.new } 
   def initialize(options = {}, &block)
     raise ArgumentError, "Connection pool requires a block" unless block
 
+    # デフォルトを補完する
     options = DEFAULTS.merge(options)
 
+    # オプションからfetchする
     @size = Integer(options.fetch(:size))
     @timeout = options.fetch(:timeout)
 
+    # ConnectionPool::TimedStackを見る必要がある。-> STEP_2
     @available = TimedStack.new(@size, &block)
     @key = :"pool-#{@available.object_id}"
     @key_count = :"pool-#{@available.object_id}-count"
   end
 
+  # STEP_3
+  # with
+  # このwithはどういったタイミングで呼ばれるのか？
+  # ？ => ユースケースは後で
+  # やってること
+  # 
+  #  checkout, checkin
   def with(options = {})
     Thread.handle_interrupt(Exception => :never) do
+      # コネクションをチェックアウト
       conn = checkout(options)
       begin
         Thread.handle_interrupt(Exception => :immediate) do
+          # ここはよくわからない
           yield conn
         end
       ensure
+        # コネクションを返す。
         checkin
       end
     end
@@ -70,18 +87,46 @@ class ConnectionPool
   alias then with
 
   def checkout(options = {})
-    if ::Thread.current[@key]
+    # STEP_4
+    # Therad.current => 現在のスレッドを返す
+    # Thread#[]= => 各スレッドに固有のキーと値をセットできる
+    # ここではkey, keycountというキーを使っているっぽい。
+    # ここで
+    # ThreadとConnectionを結びつける。
+    # その結びつけ方として、KVを用いている。
+    # 具体的には、
+    # pool-object_id => Connectionの存在を管理
+    # pool-object_id-count => Connectionの接続数を管理
+    if ::Thread.current[@key] # => RedisConnectionとか
       ::Thread.current[@key_count] += 1
       ::Thread.current[@key]
     else
       ::Thread.current[@key_count] = 1
+      # STEP_5
+      # TimedStack#pop => STEP_6
+      # 要するにコネクションを取得してくるやつ。できなかったらタイムアウトする。
       ::Thread.current[@key] = @available.pop(options[:timeout] || @timeout)
     end
   end
 
+  # STEP_7
+  # checkinする。
+  # まず ::Thread.current[@key] => true すなわち接続があることを前提としています。
+  # ::Thread.current[@key_count] == 1かどうかで場合分けしています。
+  # まず１じゃない場合
+  #
+  #  ::Thread.current[@key_count] -= 1している。
+  # つまり接続数を１つ減らす。？
+  # では1の場合
+  #
+  # @available.push(::Thread.current[@key])
+  # => STEP_8
   def checkin
     if ::Thread.current[@key]
       if ::Thread.current[@key_count] == 1
+        # スレッド内で、接続数が1の時の解放
+        # = このスレッドでは、もう接続を使わない
+        # = queに接続を戻して、他のスレッドから使えるようにしてあげる。
         @available.push(::Thread.current[@key])
         ::Thread.current[@key] = nil
         ::Thread.current[@key_count] = nil
